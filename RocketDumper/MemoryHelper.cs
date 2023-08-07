@@ -42,9 +42,8 @@ namespace RocketDumper
         {
             int bufferSize = Marshal.SizeOf<T>();
             byte[] buffer = new byte[bufferSize];
-            int bytesRead = 0;
 
-            if (!ReadProcessMemory(_processHandle, address, buffer, bufferSize, out bytesRead))
+            if (!ReadProcessMemory(_processHandle, address, buffer, bufferSize, out int bytesRead))
             {
                 Console.WriteLine("Failed to read process memory.");
                 Environment.Exit(0);
@@ -97,10 +96,9 @@ namespace RocketDumper
                 bytePattern[i] = Convert.ToByte(patternBytes[i], 16);
             }
 
-            int bytesRead = 0;
             byte[] buffer = new byte[4096];
 
-            while (ReadProcessMemory(_processHandle, BaseAddress, buffer, buffer.Length, out bytesRead))
+            while (ReadProcessMemory(_processHandle, BaseAddress, buffer, buffer.Length, out int bytesRead))
             {
                 for (int i = 0; i < bytesRead - bytePattern.Length; i++)
                 {
