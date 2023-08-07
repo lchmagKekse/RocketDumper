@@ -13,10 +13,12 @@ namespace RocketDumper
         public static IntPtr GNamesOffset;
         public static IntPtr GObjectsOffset;
 
-        public static Dictionary<int, string> FNames = new();
+        public static TArray GNames;
+        public static TArray GObjects;
+
         public static MemoryHelper RL = new();
 
-        private static void Main(string[] args)
+        private static void Main()
         {
             Console.ForegroundColor = ConsoleColor.Cyan;
             Console.Title = "Rocket League Dumper";
@@ -37,17 +39,42 @@ namespace RocketDumper
             Console.WriteLine($"GObjects-Address:\t0x{GObjectsAddress.ToInt64():X}");
             Console.WriteLine($"GObjects-Offset:\t0x{GObjectsOffset:X}\n");
 
+            GNames = RL.ReadMemory<TArray>(GNamesAddress);
+            GObjects = RL.ReadMemory<TArray>(GObjectsAddress);
+
+            Console.WriteLine($"Dumping Names...\t[{GNames.ArrayCount}]");
             DumpNames();
-            DumpObjects();            
+
+            Console.WriteLine($"\n\nDumping Objects... \t[{GObjects.ArrayCount}]");
+            DumpObjects();
 
             Console.WriteLine("\n\nDone!");
         }
 
+        private static void DumpNames()
+        {
+            using StreamWriter sw = File.AppendText(NamesPath);
+            sw.WriteLine($"Base-Address:\t\t0x{BaseAddress.ToInt64():X}\n");
+            sw.WriteLine($"GNames-Address:\t\t0x{GNamesAddress.ToInt64():X}");
+            sw.WriteLine($"GNames-Offset:\t\t0x{GNamesOffset:X}\n");
+            sw.WriteLine($"GObjects-Address:\t0x{GObjectsAddress.ToInt64():X}");
+            sw.WriteLine($"GObjects-Offset:\t0x{GObjectsOffset:X}\n");
+
+            for (int index = 0; index < GNames.ArrayCount; index++)
+            {
+                ProgressBar(index, GNames.ArrayCount);
+
+                var name = GetFName(index);
+
+                if (!String.IsNullOrWhiteSpace(name))
+                {
+                    sw.WriteLine($"[{index.ToString().PadLeft(6, '0')}] {name}");
+                }
+            }
+        }
+
         private static void DumpObjects()
         {
-            TArray GObjects = RL.ReadMemory<TArray>(GObjectsAddress);
-            Console.WriteLine($"\n\nDumping Objects... \t[{GObjects.ArrayCount}]");
-
             using StreamWriter sw = File.AppendText(ObjectsPath);
 
             sw.WriteLine($"Base-Address:\t\t0x{BaseAddress.ToInt64():X}\n");
@@ -60,60 +87,87 @@ namespace RocketDumper
             {
                 ProgressBar(i, GObjects.ArrayCount);
 
-                IntPtr ArrayData = RL.ReadMemory<IntPtr>(GObjects.ArrayData + (i * 8));
+                IntPtr uObjectPtr = RL.ReadMemory<IntPtr>(GObjects.ArrayData + (i * 8));
 
-                if (ArrayData == IntPtr.Zero)
+                if (uObjectPtr == IntPtr.Zero)
                 {
                     continue;
                 }
 
-                UObject uObject = RL.ReadMemory<UObject>(ArrayData);
-                sw.WriteLine($"[0x{ArrayData.ToInt64():X}] {FNames.FirstOrDefault(kv => kv.Key == uObject.FNameEntryId).Value}");
+                UObject uObject = RL.ReadMemory<UObject>(uObjectPtr);
+
+                string objectName = GetObjectName(uObject);
+
+                if (!String.IsNullOrWhiteSpace(objectName))
+                {
+                    sw.WriteLine($"[0x{uObjectPtr.ToInt64():X}] {objectName}");
+                }
             }
         }
 
-        private static void DumpNames()
+        public static string GetObjectName(UObject uObject)
         {
-            TArray GNames = RL.ReadMemory<TArray>(GNamesAddress);
-            Console.WriteLine($"Dumping Names...\t[{GNames.ArrayCount}]");
+            string baseName = GetFName(uObject.FNameEntryId);
+            string innerName = "";
+            string outerName = "";
 
-            using StreamWriter sw = File.AppendText(NamesPath);
-            sw.WriteLine($"Base-Address:\t\t0x{BaseAddress.ToInt64():X}\n");
-            sw.WriteLine($"GNames-Address:\t\t0x{GNamesAddress.ToInt64():X}");
-            sw.WriteLine($"GNames-Offset:\t\t0x{GNamesOffset:X}\n");
-            sw.WriteLine($"GObjects-Address:\t0x{GObjectsAddress.ToInt64():X}");
-            sw.WriteLine($"GObjects-Offset:\t0x{GObjectsOffset:X}\n");
-
-            for (int i = 0; i < GNames.ArrayCount; i++)
+            if (uObject.Class != IntPtr.Zero)
             {
-                ProgressBar(i, GNames.ArrayCount);
-
-                IntPtr ArrayData = RL.ReadMemory<IntPtr>(GNames.ArrayData + (i * 8));
-
-                if (ArrayData == IntPtr.Zero)
-                {
-                    continue;
-                }
-
-                FNameEntry entry = RL.ReadMemory<FNameEntry>(ArrayData);
-
-                if (String.IsNullOrWhiteSpace(entry.Name))
-                {
-                    continue;
-                }
-
-                FNames.Add(entry.Index, entry.Name);
-                sw.WriteLine($"[{entry.Index.ToString().PadLeft(6, '0')}] {entry.Name}");
+                UObject inner = RL.ReadMemory<UObject>(uObject.Class);
+                innerName = GetFName(inner.FNameEntryId);
             }
+
+            if (uObject.Outer != IntPtr.Zero)
+            {
+                UObject outer = RL.ReadMemory<UObject>(uObject.Outer);
+                outerName = GetFName(outer.FNameEntryId);
+
+                if (outer.Outer != IntPtr.Zero)
+                {
+                    UObject outerOuter = RL.ReadMemory<UObject>(outer.Outer);
+                    var name = GetFName(outerOuter.FNameEntryId);
+
+                    if (!String.IsNullOrWhiteSpace(name) && name != outerName)
+                    {
+                        outerName = $"{name}.{outerName}";
+                    }
+                }
+            }
+
+            if (!String.IsNullOrWhiteSpace(outerName))
+            {
+                outerName += ".";
+            }
+
+            return $"{innerName} {outerName}{baseName}";
+        }
+
+        public static string GetFName(int index)
+        {
+            IntPtr FNamePtr = RL.ReadMemory<IntPtr>(GNames.ArrayData + (index * 8));
+
+            if (FNamePtr == IntPtr.Zero)
+            {
+                return string.Empty;
+            }
+
+            FNameEntry entry = RL.ReadMemory<FNameEntry>(FNamePtr);
+
+            if (String.IsNullOrWhiteSpace(entry.Name) || entry.Index != index)
+            {
+                return string.Empty;
+            }
+
+            return entry.Name;
         }
 
         private static void ProgressBar(int currentStep, int totalSteps)
         {
             float percentage = (float)currentStep / totalSteps;
 
-            int filledWidth = 1 + (int)(percentage * 40);
+            int filledWidth = 1 + (int)(percentage * 30);
 
-            string progressBar = "[" + new string('=', filledWidth) + new string(' ', 40 - filledWidth) + "]";
+            string progressBar = "[" + new string('=', filledWidth) + new string(' ', 30 - filledWidth) + "]";
 
             Console.Write("\r" + progressBar + $" {percentage:P0}");
         }
