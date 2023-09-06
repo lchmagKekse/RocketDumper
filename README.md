@@ -29,3 +29,23 @@ GNames.txt
 [000006] NameProperty
 ...
 ```
+
+### Install
+
+```
+dotnet pack
+dotnet tool install --global --add-source ./nupkg RocketDumper
+```
+
+### Usage
+
+```
+rocketdumper
+```
+(Creates GObjects.txt & GNames.txt in your current directory)
+
+### Uninstall
+
+```
+dotnet tool uninstall -g RocketDumper
+```
